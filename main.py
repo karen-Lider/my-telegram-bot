@@ -1,43 +1,53 @@
 import os
 import logging
-import threading
-from http.server import HTTPServer, BaseHTTPRequestHandler
-from telegram import Update
+from flask import Flask, request
+from telegram import Update, LabeledPrice
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from groq import Groq
 
 # Настройка логирования
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
-# --- 1. Легкий веб-сервер для бесплатного тарифа Render (НЕ ТРОГАТЬ) ---
-class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.end_headers()
-        self.wfile.write(b"Bot is running!")
+# Инициализация Flask для вебхуков и UptimeRobot
+app = Flask(__name__)
 
-    def do_HEAD(self):
-        self.send_response(200)
-        self.end_headers()
-
-def run_http_server():
-    port = int(os.environ.get("PORT", 10000))
-    server = HTTPServer(('0.0.0.0', port), SimpleHTTPRequestHandler)
-    server.serve_forever()
-
-# Запускаем веб-сервер в фоновом потоке
-threading.Thread(target=run_http_server, daemon=True).start()
-
-# --- 2. Инициализация Groq ---
+# --- 1. Инициализация Groq ---
 groq_api_key = os.environ.get("GROQ_API_KEY")
 groq_client = Groq(api_key=groq_api_key) if groq_api_key else None
 
-# --- 3. Логика работы бота (Бизнес-аналитик на армянском) ---
+# --- 2. Логика работы бота (Бизнес-аналитик на армянском) ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "Բարև Ձեզ! Ես Ձեր մասնագիտական բիզնես-վերլուծաբանն ու ռազմավարական խորհրդատուն եմ: "
-        "Պատրաստ եմ օգնել Ձեզ բիզնես խնդիրների լուծման, վերլուծությունների և պլանավորման հարցում:"
+        "Պատրաստ եմ օգնել Ձեզ բիզնես խնդիրների լուծման, վերլուծությունների և պլանավորման հարցում:\n\n"
+        "Խորհրդատվության համար վճարելու համար ուղարկեք /pay հրամանը:"
     )
+
+# Команда для оплаты консультации Звездами (Telegram Stars)
+async def pay_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    
+    title = "Բիզնես-խորհրդատվություն"
+    description = "Անհատական ​​ռազմավարական սեսիա բիզնես-վերլուծաբանի հետ"
+    payload = "consultation_payment" 
+    currency = "XTR"  # Валюта Telegram Stars
+    
+    # 100 звезд (можно изменить сумму при желании)
+    prices = [LabeledPrice("Խորհրդատվություն", 100)] 
+
+    try:
+        await context.bot.send_invoice(
+            chat_id=chat_id,
+            title=title,
+            description=description,
+            payload=payload,
+            provider_token="",  # ДЛЯ STARS ОБЯЗАТЕЛЬНО ПУСТАЯ СТРОКА!
+            currency=currency,
+            prices=prices,
+        )
+    except Exception as e:
+        logging.error(f"Ошибка отправки счета: {e}")
+        await update.message.reply_text("Սխալ վճարման հաշիվ ուղարկելիս:")
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_text = update.message.text
@@ -47,7 +57,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     try:
-        # Инструкция для нейросети: быть бизнес-аналитиком и писать на армянском
         chat_completion = groq_client.chat.completions.create(
             messages=[
                 {
@@ -66,22 +75,42 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(answer)
     except Exception as e:
         logging.error(f"Ошибка Groq: {e}")
-        await update.message.reply_text("Տեղի է ունեցել սխալ նეյրոցանցի հետ աշխատելիս:")
+        await update.message.reply_text("Տեղի է ունեցել սխալ նեյրոցանցի հետ աշխատելիս:")
 
-def main():
-    token = os.environ.get("TELEGRAM_BOT_TOKEN")
+# --- 3. Настройка приложения Telegram ---
+token = os.environ.get("TELEGRAM_BOT_TOKEN")
+application = Application.builder().token(token).build()
+
+# Добавляем обработчики
+application.add_handler(CommandHandler("start", start))
+application.add_handler(CommandHandler("pay", pay_command))
+application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+
+# --- 4. Маршруты веб-сервера (Flask) ---
+@app.route(f"/{token}", methods=["POST"])
+def webhook():
+    """Прием сообщений от Telegram через вебхук"""
+    update = Update.de_json(request.get_json(force=True), application.bot)
+    application.update_queue.put_nowait(update)
+    return "ok", 200
+
+@app.route("/", methods=["GET", "HEAD"])
+def index():
+    """Страница для UptimeRobot (отвечает на GET и HEAD запросы)"""
+    return "Bot is running!", 200
+
+if __name__ == "__main__":
+    PORT = int(os.environ.get("PORT", 10000))
     
-    if not token:
-        print("Ошибка: TELEGRAM_BOT_TOKEN не найден в настройках!")
-        return
+    # Автоматическая привязка вебхука к Render при запуске
+    RENDER_URL = os.environ.get("RENDER_EXTERNAL_URL")
+    if RENDER_URL:
+        webhook_url = f"{RENDER_URL}/{token}"
+        application.bot.set_webhook(webhook_url)
+        logging.info(f"Вебхук установлен: {webhook_url}")
 
-    application = Application.builder().token(token).build()
-
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-
-    print("Бот запущен!")
-    application.run_polling()
-
-if __name__ == '__main__':
-    main()
+    application.initialize()
+    application.start()
+    
+    # Запуск сервера
+    app.run(host="0.0.0.0", port=PORT)
