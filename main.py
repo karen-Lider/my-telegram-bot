@@ -9,14 +9,13 @@ from groq import Groq
 # Настройка логирования
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
-# --- 1. Легкий веб-сервер для бесплатного тарифа Render ---
+# --- 1. Легкий веб-сервер для бесплатного тарифа Render (НЕ ТРОГАТЬ) ---
 class SimpleHTTPRequestHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
         self.end_headers()
         self.wfile.write(b"Bot is running!")
 
-    # Принимаем HEAD-запросы от UptimeRobot:
     def do_HEAD(self):
         self.send_response(200)
         self.end_headers()
@@ -33,28 +32,41 @@ threading.Thread(target=run_http_server, daemon=True).start()
 groq_api_key = os.environ.get("GROQ_API_KEY")
 groq_client = Groq(api_key=groq_api_key) if groq_api_key else None
 
-# --- 3. Логика работы бота ---
+# --- 3. Логика работы бота (Бизнес-аналитик на армянском) ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Привет! Я ИИ-бот. Задай мне любой вопрос!")
+    await update.message.reply_text(
+        "Բարև Ձեզ! Ես Ձեր մասնագիտական բիզնես-վերլուծաբանն ու ռազմավարական խորհրդատուն եմ: "
+        "Պատրաստ եմ օգնել Ձեզ բիզնես խնդիրների լուծման, վերլուծությունների և պլանավորման հարցում:"
+    )
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_text = update.message.text
     
     if not groq_client:
-        await update.message.reply_text("Ошибка: Ключ GROQ_API_KEY не найден в настройках.")
+        await update.message.reply_text("Սխալ: GROQ_API_KEY-ը գտնված չէ կարգավորումներում:")
         return
 
     try:
-        # Отправляем запрос в нейросеть Groq
+        # Инструкция для нейросети: быть бизнес-аналитиком и писать на армянском
         chat_completion = groq_client.chat.completions.create(
-            messages=[{"role": "user", "content": user_text}],
+            messages=[
+                {
+                    "role": "system", 
+                    "content": (
+                        "You are a top-tier professional Business Analyst and strategic expert. "
+                        "You provide expert, highly accurate, strategic business advice, data analysis, and professional insights. "
+                        "ALWAYS respond in fluent, professional, and grammatically correct Armenian language."
+                    )
+                },
+                {"role": "user", "content": user_text}
+            ],
             model="llama-3.3-70b-versatile",
         )
         answer = chat_completion.choices[0].message.content
         await update.message.reply_text(answer)
     except Exception as e:
         logging.error(f"Ошибка Groq: {e}")
-        await update.message.reply_text("Произошла ошибка при обращении к нейросети.")
+        await update.message.reply_text("Տեղի է ունեցել սխալ նეյրոցանցի հետ աշխատելիս:")
 
 def main():
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
