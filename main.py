@@ -1,5 +1,9 @@
 import os
 import logging
+from dotenv import load_dotenv  # <--- Импортируем загрузчик
+
+load_dotenv()  # <--- Загружаем данные из .env файла
+
 from flask import Flask, request
 from telegram import Update, LabeledPrice
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
