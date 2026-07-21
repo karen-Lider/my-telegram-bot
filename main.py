@@ -37,7 +37,7 @@ async def pay_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     currency = "XTR"  # Валюта Telegram Stars
     
     # 100 звезд (можно изменить сумму при желании)
-    prices = [LabeledPrice("Խորհրդատվություն", 100)] 
+    prices = [LabeledPrice("Խորհրդատվություն", amount=10)] 
 
     try:
         await context.bot.send_invoice(
