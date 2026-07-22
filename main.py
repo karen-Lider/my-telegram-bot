@@ -1,6 +1,8 @@
 import logging
 import os
+import threading
 from dotenv import load_dotenv
+from flask import Flask
 
 load_dotenv()
 
@@ -14,18 +16,28 @@ from telegram.ext import (
     filters,
 )
 
-# Логирование
+# Настройка логирования
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO,
 )
 
-# 1. Инициализация Groq
+# 1. Заглушка Flask для проверки портов Render
+app = Flask(__name__)
+
+@app.route("/")
+def home():
+    return "Bot is running!", 200
+
+def run_flask():
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
+
+# 2. Инициализация Groq
 groq_api_key = os.environ.get("GROQ_API_KEY")
 groq_client = Groq(api_key=groq_api_key) if groq_api_key else None
 
-
-# 2. Обработчики команд
+# 3. Обработчики команд Telegram
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "Բարև Ձեզ! Ես Ձեր մասնագիտական բիզնես-վերլուծաբանն ու ռազմավարական խորհրդատուն եմ: "
@@ -33,16 +45,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Խորհրդատվության համար վճարելու համար ուղարկեք /pay հրամանը:"
     )
 
-
 async def pay_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
 
     title = "Բիզնես-խորհրդատվություն"
-    description = (
-        "Անհատական ​​ռազմավարական սեսիա բիզնես-վերլուծաբանի հետ"
-    )
+    description = "Անհատական ​​ռազմավարական սեսիա բիզնես-վերլուծաբանի հետ"
     payload = "consultation_payment"
-    currency = "XTR"  # Валюта Telegram Stars
+    currency = "XTR"  # Telegram Stars
 
     # Сумма: 100 звёзд
     prices = [LabeledPrice("Խորհրդատվություն", amount=100)]
@@ -53,7 +62,7 @@ async def pay_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             title=title,
             description=description,
             payload=payload,
-            provider_token="",  # Для Stars - пустая строка
+            provider_token="",  # Для Stars — пустая строка
             currency=currency,
             prices=prices,
         )
@@ -61,14 +70,11 @@ async def pay_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logging.error(f"Ошибка отправки счета: {e}")
         await update.message.reply_text("Սխալ վճարման հաշիվ ուղարկելիս:")
 
-
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_text = update.message.text
 
     if not groq_client:
-        await update.message.reply_text(
-            "Սխալ: GROQ_API_KEY-ը գտնված չէ կարգավորումներում:"
-        )
+        await update.message.reply_text("Սխալ: GROQ_API_KEY-ը գտնված չէ կարգավորումներում:")
         return
 
     try:
@@ -90,21 +96,20 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(answer)
     except Exception as e:
         logging.error(f"Ошибка Groq: {e}")
-        await update.message.reply_text(
-            "Տեղի է ունեցել սխալ նեյրոցանցի հետ աշխատելիս:"
-        )
+        await update.message.reply_text("Տեղի է ունեցել սխալ նեյրոցանցի հետ աշխատելիս:")
 
-
-# 3. Запуск бота через Polling
+# 4. Точка входа
 if __name__ == "__main__":
+    # Запускаем Flask в отдельном фоновом потоке для Render
+    threading.Thread(target=run_flask, daemon=True).start()
+
+    # Запускаем Telegram-бота через Polling
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
     application = Application.builder().token(token).build()
 
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("pay", pay_command))
-    application.add_handler(
-        MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message)
-    )
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     logging.info("Бот запущен...")
     application.run_polling()
