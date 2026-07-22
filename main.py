@@ -22,7 +22,12 @@ logging.basicConfig(
     level=logging.INFO,
 )
 
-# 1. Заглушка Flask для проверки портов Render
+# ==========================================
+# УКАЖИ ЗДЕСЬ СВОЙ TELEGRAM ID (ЧИСЛО):
+OWNER_ID = 123456789  # Замени на свой ID!
+# ==========================================
+
+# 1. Заглушка Flask для работы на Render 24/7
 app = Flask(__name__)
 
 @app.route("/")
@@ -37,24 +42,40 @@ def run_flask():
 groq_api_key = os.environ.get("GROQ_API_KEY")
 groq_client = Groq(api_key=groq_api_key) if groq_api_key else None
 
-# 3. Обработчики команд Telegram
+# 3. Команда /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "Բարև Ձեզ! Ես Ձեր մասնագիտական բիզնես-վերլուծաբանն ու ռազմավարական խորհրդատուն եմ: "
-        "Պատրաստ եմ օգնել Ձեզ բիզնես խնդիրների լուծման, վերլուծությունների և պլանավորման հարցում:\n\n"
-        "Խորհրդատվության համար վճարելու համար ուղարկեք /pay հրամանը:"
-    )
+    user_id = update.effective_user.id
+    
+    if user_id == OWNER_ID:
+        msg = (
+            "Բարև Ձեզ, հարգելի ադմինիստրատոր! Ձեզ համար բոտի բոլոր ֆունկցիաները "
+            "անվճար են: Կարող եք տալ ցանկացած հարց:"
+        )
+    else:
+        msg = (
+            "Բարև Ձեզ! Ես Ձեր մասնագիտական բիզնես-վերլուծաբանն ու ռազմավարական խորհրդատուն եմ: "
+            "Պատրաստ եմ օգնել Ձեզ բիզնես խնդիրների լուծման, վերլուծությունների և պլանավորման հարցում:\n\n"
+            "Խորհրդատվության համար վճարելու համար ուղարկեք /pay հրամանը:"
+        )
+    await update.message.reply_text(msg)
 
+# 4. Команда /pay (Оплата 100 Звёзд)
 async def pay_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.effective_chat.id
+    user_id = update.effective_user.id
 
+    if user_id == OWNER_ID:
+        await update.message.reply_text("Դուք ադմինիստրատորն եք: Ձեզ համար վճարում չի պահանջվում:")
+        return
+
+    chat_id = update.effective_chat.id
     title = "Բիզնես-խորհրդատվություն"
     description = "Անհատական ​​ռազմավարական սեսիա բիզնես-վերլուծաբանի հետ"
     payload = "consultation_payment"
-    currency = "XTR"  # Telegram Stars
 
-    # Сумма: 100 звёзд
-    prices = [LabeledPrice("Խորհրդատվություն", amount=100)]
+    # Параметры STRICTLY для Telegram Stars (XTR)
+    currency = "XTR"
+    provider_token = ""
+    prices = [LabeledPrice("Խորհրդատվություն", amount=100)]  # 100 звёзд
 
     try:
         await context.bot.send_invoice(
@@ -62,7 +83,7 @@ async def pay_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             title=title,
             description=description,
             payload=payload,
-            provider_token="",  # Для Stars — пустая строка
+            provider_token=provider_token,
             currency=currency,
             prices=prices,
         )
@@ -70,9 +91,20 @@ async def pay_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logging.error(f"Ошибка отправки счета: {e}")
         await update.message.reply_text("Սխալ վճարման հաշիվ ուղարկելիս:")
 
+# 5. Обработка текстовых сообщений
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
     user_text = update.message.text
 
+    # Проверка: если не владелец, просим оплатить
+    if user_id != OWNER_ID:
+        await update.message.reply_text(
+            "Ծառայությունից օգտվելու համար անհրաժեշտ է վճարել 100 աստղ (Telegram Stars):\n"
+            "Ուղարկեք /pay հրամանը վճարման համար:"
+        )
+        return
+
+    # Для владельца — ответы от нейросети Groq без ограничений
     if not groq_client:
         await update.message.reply_text("Սխալ: GROQ_API_KEY-ը գտնված չէ կարգավորումներում:")
         return
@@ -98,12 +130,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logging.error(f"Ошибка Groq: {e}")
         await update.message.reply_text("Տեղի է ունեցել սխալ նեյրոցանցի հետ աշխատելիս:")
 
-# 4. Точка входа
+# 6. Запуск
 if __name__ == "__main__":
-    # Запускаем Flask в отдельном фоновом потоке для Render
     threading.Thread(target=run_flask, daemon=True).start()
 
-    # Запускаем Telegram-бота через Polling
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
     application = Application.builder().token(token).build()
 
